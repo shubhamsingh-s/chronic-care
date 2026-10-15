@@ -68,7 +68,30 @@ def register(user_in: UserRegister, request: Request, db: Session = Depends(get_
     
     log_audit(db, new_user.id, "REGISTER", "user", str(new_user.id), {"role": new_user.role}, request.client.host if request.client else None)
     
+    # Mirror new user to MongoDB Atlas if connected
+    try:
+        from backend.app.mongodb import mongo_manager
+        if mongo_manager.is_connected and mongo_manager.db is not None:
+            mongo_manager.db.users.update_one(
+                {"id": new_user.id},
+                {"$set": {
+                    "id": new_user.id,
+                    "email": new_user.email,
+                    "password_hash": new_user.password_hash,
+                    "role": new_user.role,
+                    "full_name": new_user.full_name,
+                    "phone": new_user.phone,
+                    "is_active": new_user.is_active,
+                    "questionnaire_completed": new_user.questionnaire_completed,
+                    "created_at": new_user.created_at.isoformat() if new_user.created_at else None
+                }},
+                upsert=True
+            )
+    except Exception:
+        pass
+
     access_token = create_access_token({"sub": str(new_user.id), "role": new_user.role})
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
