@@ -7,10 +7,11 @@ import {
 } from 'lucide-react';
 
 export const OnboardingWizard: React.FC<{ onCompleted: () => void }> = ({ onCompleted }) => {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSessionExpired, setIsSessionExpired] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -166,7 +167,13 @@ export const OnboardingWizard: React.FC<{ onCompleted: () => void }> = ({ onComp
       await refreshUser();
       onCompleted();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Submission failed. Please check inputs.');
+      const msg = typeof err?.message === 'string' ? err.message : JSON.stringify(err?.message || err);
+      if (err.status === 401 || msg.includes('validate credentials') || msg.includes('expired')) {
+        setIsSessionExpired(true);
+        setErrorMsg('Your session has expired due to a server deployment or timeout. Please click "Sign In Again" below.');
+      } else {
+        setErrorMsg(msg || 'Submission failed. Please check inputs.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -207,12 +214,23 @@ export const OnboardingWizard: React.FC<{ onCompleted: () => void }> = ({ onComp
       </div>
 
       {errorMsg && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold">Validation Notice</p>
-            <p className="text-red-700 text-xs mt-0.5">{errorMsg}</p>
+        <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Validation Notice</p>
+              <p className="text-red-700 text-xs mt-0.5">{errorMsg}</p>
+            </div>
           </div>
+          {isSessionExpired && (
+            <button
+              onClick={() => logout()}
+              type="button"
+              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shrink-0 transition-colors shadow-sm"
+            >
+              Sign In Again
+            </button>
+          )}
         </div>
       )}
 

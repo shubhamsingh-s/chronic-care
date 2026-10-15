@@ -10,6 +10,7 @@ services:
       - key: ADMIN_ACCESS_CODE
         value: ADMIN-2026-CHRONIC-CARE
       - key: SECRET_KEY
-        generateValue: true
+        value: super-secret-clinical-ai-jwt-key-2026-production-grade
+
       - key: MONGODB_URI
         sync: false
