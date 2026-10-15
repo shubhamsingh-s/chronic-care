@@ -36,7 +36,21 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     let errorDetail = 'Request failed';
     try {
       const errData = await response.json();
-      errorDetail = errData.detail || errData.message || errorDetail;
+      if (Array.isArray(errData.detail)) {
+        errorDetail = errData.detail
+          .map((d: any) => {
+            const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : '';
+            const msg = d.msg || JSON.stringify(d);
+            return field ? `${field}: ${msg}` : msg;
+          })
+          .join('; ');
+      } else if (typeof errData.detail === 'object' && errData.detail !== null) {
+        errorDetail = JSON.stringify(errData.detail);
+      } else if (errData.detail) {
+        errorDetail = String(errData.detail);
+      } else if (errData.message) {
+        errorDetail = typeof errData.message === 'string' ? errData.message : JSON.stringify(errData.message);
+      }
     } catch {
       errorDetail = `HTTP ${response.status}: ${response.statusText}`;
     }

@@ -24,13 +24,36 @@ export const LoginRegister: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setErrorMsg(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorMsg('Please enter a valid email address.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (isRegister) {
+      if (!fullName.trim()) {
+        setErrorMsg('Please enter your full legal name.');
+        return;
+      }
+      if (role === 'admin' && !adminCode.trim()) {
+        setErrorMsg('Please enter the Administrator Security Key.');
+        return;
+      }
+    }
+
+    setLoading(true);
 
     try {
       if (isRegister) {
         const payload: any = {
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           password,
           role,
           full_name: fullName.trim(),
@@ -48,13 +71,14 @@ export const LoginRegister: React.FC = () => {
         login(res.access_token, res.user);
       } else {
         const res = await api.login({
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           password
         });
         login(res.access_token, res.user);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed. Please verify credentials.');
+      const msg = typeof err?.message === 'string' ? err.message : JSON.stringify(err?.message || err);
+      setErrorMsg(msg || 'Authentication failed. Please verify credentials.');
     } finally {
       setLoading(false);
     }
