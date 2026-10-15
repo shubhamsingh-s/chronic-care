@@ -205,3 +205,26 @@ def get_platform_analytics(
         "disease_distribution": disease_dist,
         "triage_distribution": triage_dist
     }
+
+@router.get("/mongodb/status")
+def get_mongodb_status(
+    current_user: User = Depends(require_role(["admin"])),
+    db: Session = Depends(get_db)
+):
+    from backend.app.mongodb import mongo_manager
+    return mongo_manager.check_health()
+
+@router.post("/mongodb/sync")
+def trigger_mongodb_sync(
+    current_user: User = Depends(require_role(["admin"])),
+    db: Session = Depends(get_db)
+):
+    from backend.app.mongodb import mongo_manager
+    success = mongo_manager.sync_from_sqlite(db)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MongoDB Atlas synchronization could not complete. Check cluster connection or credentials."
+        )
+    return {"status": "success", "message": "All clinical records synchronized to MongoDB Atlas."}
+

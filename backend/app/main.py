@@ -43,14 +43,29 @@ app.include_router(admin.router, prefix="/api")
 # Mount uploads directory for authenticated/protected document downloads
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
+from backend.app.mongodb import mongo_manager
+from backend.app.database import SessionLocal
+
+@app.on_event("startup")
+def startup_event():
+    # If MongoDB Atlas is connected, synchronize existing records
+    if mongo_manager.is_connected:
+        db = SessionLocal()
+        try:
+            mongo_manager.sync_from_sqlite(db)
+        finally:
+            db.close()
+
 @app.get("/api/health")
 def health_check():
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "engine": "FastAPI + SQLAlchemy + Scikit-Learn Triage Engine"
+        "engine": "FastAPI + Hybrid Relational/MongoDB Atlas + Scikit-Learn Triage",
+        "mongodb": mongo_manager.check_health()
     }
+
 
 # Serve frontend build if dist directory exists
 frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "frontend", "dist")

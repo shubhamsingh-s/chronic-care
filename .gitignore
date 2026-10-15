@@ -45,8 +45,14 @@ yarn-error.log*
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# Local Environment & Secrets
+.env
+.env.*
+!.env.example
+
 # IDEs & System
 .vscode/
+
 .idea/
 .DS_Store
 Thumbs.db

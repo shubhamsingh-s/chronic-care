@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./chronic_care.db")
     FALLBACK_SQLITE_URL: str = "sqlite:///./chronic_care.db"
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
     
     # Storage
     UPLOAD_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
