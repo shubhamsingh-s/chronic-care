@@ -9,13 +9,20 @@ import { TriageBadge } from '../components/TriageBadge';
 
 export const DoctorPortal: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'queue' | 'pending' | 'patients' | 'consultation'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'pending' | 'patients' | 'consultation'>(() => {
+    return (sessionStorage.getItem('chroniccare_doctor_tab') as any) || 'queue';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('chroniccare_doctor_tab', activeTab);
+  }, [activeTab]);
 
   // Doctor Data
   const [overview, setOverview] = useState<any>(null);
   const [priorityQueue, setPriorityQueue] = useState<any[]>([]);
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
+  const [patientScopeFilter, setPatientScopeFilter] = useState<'all' | 'panel'>('all');
 
   // Selected Patient Records View (Gated)
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
@@ -40,9 +47,9 @@ export const DoctorPortal: React.FC = () => {
     try {
       const [ov, pq, pr, ap] = await Promise.all([
         api.getDoctorOverview(),
-        api.getPriorityQueue({ tier: tierFilter, unreviewed_only: unreviewedOnly }),
+        api.getPriorityQueue({ tier: tierFilter, unreviewed_only: unreviewedOnly, scope: 'all' }),
         api.getPendingRequests(),
-        api.getActivePatients()
+        api.getActivePatients({ scope: patientScopeFilter })
       ]);
       setOverview(ov);
       setPriorityQueue(pq);
@@ -59,7 +66,8 @@ export const DoctorPortal: React.FC = () => {
 
   useEffect(() => {
     fetchDoctorData();
-  }, [tierFilter, unreviewedOnly]);
+  }, [tierFilter, unreviewedOnly, patientScopeFilter]);
+
 
   // Load chat messages when selectedChatPatient changes
   useEffect(() => {
@@ -82,6 +90,16 @@ export const DoctorPortal: React.FC = () => {
       await fetchDoctorData();
     } catch (err: any) {
       alert(`Action failed: ${err.message}`);
+    }
+  };
+
+  const handleConnectPatient = async (patientId: number) => {
+    try {
+      await api.connectPatientToPanel(patientId);
+      alert('Patient successfully added to your active clinical panel.');
+      await fetchDoctorData();
+    } catch (err: any) {
+      alert(`Connection failed: ${err.message}`);
     }
   };
 
@@ -461,15 +479,37 @@ export const DoctorPortal: React.FC = () => {
           <div className="space-y-6">
             {!selectedPatientId ? (
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
                   <div>
                     <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                       <Users className="w-5 h-5 text-teal-600" />
-                      Authorized Active Patient Registry
+                      Clinical Patient Directory & Active Registry
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Patients with accepted consultation relationships. Click any row to view full authorized clinical history.
+                      View all registered patients across the clinic pipeline or filter to your direct assigned panel.
                     </p>
+                  </div>
+                  <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setPatientScopeFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        patientScopeFilter === 'all'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      All Clinic Patients ({overview?.total_clinic_patients ?? activePatients.length})
+                    </button>
+                    <button
+                      onClick={() => setPatientScopeFilter('panel')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        patientScopeFilter === 'panel'
+                          ? 'bg-white text-teal-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      My Assigned Panel ({overview?.active_patients_count ?? 0})
+                    </button>
                   </div>
                 </div>
 
@@ -482,41 +522,68 @@ export const DoctorPortal: React.FC = () => {
                         <th className="px-4 py-3">Demographics</th>
                         <th className="px-4 py-3">Current Triage Alert</th>
                         <th className="px-4 py-3">AI Risk Score</th>
-                        <th className="px-4 py-3">Care Relationship Established</th>
+                        <th className="px-4 py-3">Panel Status</th>
                         <th className="px-4 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {activePatients.map((pat) => (
-                        <tr key={pat.patient_id} className="hover:bg-slate-50/70">
-                          <td className="px-4 py-3.5 font-bold text-slate-900">
-                            {pat.full_name}
-                          </td>
-                          <td className="px-4 py-3.5 capitalize text-slate-700 font-semibold">
-                            {pat.primary_disease.replace('_', ' ')}
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-500">
-                            {pat.age ? `${pat.age} yrs` : 'N/A'}, {pat.sex || 'N/A'}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <TriageBadge priority={pat.current_triage} />
-                          </td>
-                          <td className="px-4 py-3.5 font-extrabold text-slate-900">
-                            {pat.risk_score ? `${pat.risk_score}%` : 'N/A'}
-                          </td>
-                          <td className="px-4 py-3.5 text-slate-500">
-                            {pat.relationship_established ? new Date(pat.relationship_established).toLocaleDateString() : 'Active'}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <button
-                              onClick={() => handleOpenPatientRecords(pat.patient_id)}
-                              className="px-3 py-1.5 rounded-lg bg-teal-50 text-teal-800 hover:bg-teal-100 font-bold text-xs"
-                            >
-                              Open Full Record &rarr;
-                            </button>
+                      {activePatients.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-slate-400">
+                            No patients found under this filter.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        activePatients.map((pat) => (
+                          <tr key={pat.patient_id} className="hover:bg-slate-50/70">
+                            <td className="px-4 py-3.5">
+                              <div className="font-bold text-slate-900">{pat.full_name}</div>
+                              <div className="text-[10px] text-slate-400">ID #{pat.patient_id}</div>
+                            </td>
+                            <td className="px-4 py-3.5 capitalize text-slate-700 font-semibold">
+                              {pat.primary_disease ? pat.primary_disease.replace('_', ' ') : 'General Care'}
+                            </td>
+                            <td className="px-4 py-3.5 text-slate-500">
+                              {pat.age ? `${pat.age} yrs` : 'N/A'}, {pat.sex || 'N/A'}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <TriageBadge priority={pat.current_triage} />
+                            </td>
+                            <td className="px-4 py-3.5 font-extrabold text-slate-900">
+                              {pat.risk_score ? `${pat.risk_score}%` : 'N/A'}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              {pat.is_in_panel ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                  Direct Panel
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+                                  Clinic Registry
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <div className="flex items-center space-x-2">
+                                {!pat.is_in_panel && (
+                                  <button
+                                    onClick={() => handleConnectPatient(pat.patient_id)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs"
+                                  >
+                                    + Add to Panel
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleOpenPatientRecords(pat.patient_id)}
+                                  className="px-3 py-1.5 rounded-lg bg-teal-50 text-teal-800 hover:bg-teal-100 font-bold text-xs"
+                                >
+                                  View Chart &rarr;
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>

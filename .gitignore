@@ -33,7 +33,8 @@ htmlcov/
 node_modules/
 frontend/node_modules/
 # Keep frontend/dist tracked for direct cloud serving
-# frontend/dist/
+!frontend/dist/
+!frontend/dist/**
 
 .npm/
 npm-debug.log*

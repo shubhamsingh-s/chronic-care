@@ -11,8 +11,13 @@ export const AdminPortal: React.FC = () => {
   const [accessCode, setAccessCode] = useState('');
   const [gateError, setGateError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [activeTab, setActiveTab] = useState<'users' | 'analytics' | 'audit'>(() => {
+    return (sessionStorage.getItem('chroniccare_admin_tab') as any) || 'users';
+  });
 
-  const [activeTab, setActiveTab] = useState<'users' | 'analytics' | 'audit'>('users');
+  useEffect(() => {
+    sessionStorage.setItem('chroniccare_admin_tab', activeTab);
+  }, [activeTab]);
   const [users, setUsers] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);

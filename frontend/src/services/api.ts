@@ -84,12 +84,17 @@ export const api = {
   getPendingRequests: () => request<any[]>('/doctor/pending-requests'),
   actOnRequest: (id: number, data: { action: 'accept' | 'decline'; doctor_response_notes?: string }) =>
     request<any>(`/doctor/requests/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
-  getActivePatients: () => request<any[]>('/doctor/active-patients'),
+  getActivePatients: (params: Record<string, any> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<any[]>(`/doctor/active-patients${qs ? `?${qs}` : ''}`);
+  },
   getPatientRecords: (patientId: number) => request<any>(`/doctor/patient/${patientId}/records`),
+  connectPatientToPanel: (patientId: number) => request<any>(`/doctor/patient/${patientId}/connect`, { method: 'POST' }),
   getPriorityQueue: (params: Record<string, any> = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request<any[]>(`/doctor/priority-queue${qs ? `?${qs}` : ''}`);
   },
+
   reviewDailyReport: (id: number, data: { feedback: string }) =>
     request<any>(`/doctor/reports/${id}/review`, { method: 'POST', body: JSON.stringify(data) }),
 

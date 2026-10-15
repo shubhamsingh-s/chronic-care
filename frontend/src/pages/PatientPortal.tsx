@@ -15,7 +15,13 @@ import { EmergencyBanner } from '../components/EmergencyBanner';
 
 export const PatientPortal: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    return sessionStorage.getItem('chroniccare_patient_tab') || 'overview';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('chroniccare_patient_tab', activeTab);
+  }, [activeTab]);
 
   // Dashboard Data
   const [dashboard, setDashboard] = useState<any>(null);

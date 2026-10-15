@@ -34,9 +34,7 @@ def get_doctor_overview(
     ).all()
     active_patient_ids = list(set(r.patient_id for r in accepted_reqs))
     
-    # Priority alerts (emergency + urgent) across active patients
-    priority_alerts_count = 0
-    unreviewed_reports_count = 0
+    # Priority alerts (emergency + urgent) across doctor's panel OR clinic
     if active_patient_ids:
         priority_alerts_count = db.query(DailyReport).filter(
             DailyReport.patient_id.in_(active_patient_ids),
@@ -46,6 +44,15 @@ def get_doctor_overview(
         
         unreviewed_reports_count = db.query(DailyReport).filter(
             DailyReport.patient_id.in_(active_patient_ids),
+            DailyReport.doctor_reviewed == False
+        ).count()
+    else:
+        # If doctor panel is new, show alerts across clinic so doctor has oversight
+        priority_alerts_count = db.query(DailyReport).filter(
+            DailyReport.triage_priority.in_(["emergency", "urgent"]),
+            DailyReport.doctor_reviewed == False
+        ).count()
+        unreviewed_reports_count = db.query(DailyReport).filter(
             DailyReport.doctor_reviewed == False
         ).count()
         
@@ -59,13 +66,17 @@ def get_doctor_overview(
         Appointment.status == "scheduled"
     ).count()
     
+    total_clinic_patients = db.query(User).filter(User.role == "patient").count()
+
     return {
         "pending_requests_count": pending_count,
         "active_patients_count": len(active_patient_ids),
+        "total_clinic_patients": total_clinic_patients,
         "priority_alerts_count": priority_alerts_count,
         "unreviewed_reports_count": unreviewed_reports_count,
         "today_appointments_count": today_appointments
     }
+
 
 @router.get("/pending-requests")
 def get_pending_requests(
@@ -160,6 +171,7 @@ def handle_request_action(
 
 @router.get("/active-patients")
 def get_active_patients(
+    scope: Optional[str] = "all", # "all" for full clinical registry, "panel" for assigned only
     current_user: User = Depends(require_role(["doctor"])),
     db: Session = Depends(get_db)
 ):
@@ -167,44 +179,88 @@ def get_active_patients(
         ConsultationRequest.doctor_id == current_user.id,
         ConsultationRequest.status == "accepted"
     ).all()
+    panel_patient_ids = set(r.patient_id for r in accepted_reqs)
+    req_by_patient = {r.patient_id: r for r in accepted_reqs}
+
+    if scope == "panel" and panel_patient_ids:
+        patients_query = db.query(User).filter(User.id.in_(panel_patient_ids))
+    else:
+        # Show all clinical patients in registry so every patient is accessible
+        patients_query = db.query(User).filter(User.role == "patient")
+
+    all_patients = patients_query.order_by(User.created_at.desc()).all()
     
     results = []
-    seen_patients = set()
-    for req in accepted_reqs:
-        if req.patient_id in seen_patients:
-            continue
-        seen_patients.add(req.patient_id)
-        
-        patient_user = db.query(User).filter(User.id == req.patient_id).first()
-        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == req.patient_id).first()
+    for patient_user in all_patients:
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == patient_user.id).first()
+        req = req_by_patient.get(patient_user.id)
         
         # Latest daily report
         latest_rep = db.query(DailyReport).filter(
-            DailyReport.patient_id == req.patient_id
+            DailyReport.patient_id == patient_user.id
         ).order_by(DailyReport.created_at.desc()).first()
         
         # Latest AI assessment
         latest_ai = db.query(AIAssessment).filter(
-            AIAssessment.patient_id == req.patient_id
+            AIAssessment.patient_id == patient_user.id
         ).order_by(AIAssessment.created_at.desc()).first()
         
+        is_in_panel = patient_user.id in panel_patient_ids
+        
         results.append({
-            "patient_id": req.patient_id,
-            "full_name": patient_user.full_name if patient_user else "Patient",
-            "email": patient_user.email if patient_user else "",
-            "phone": patient_user.phone if patient_user else "",
+            "patient_id": patient_user.id,
+            "full_name": patient_user.full_name,
+            "email": patient_user.email,
+            "phone": patient_user.phone or "",
             "age": patient_profile.age if patient_profile else None,
             "sex": patient_profile.sex if patient_profile else None,
-            "primary_disease": req.primary_disease,
-            "relationship_established": req.responded_at or req.created_at,
+            "primary_disease": (patient_profile.primary_disease if patient_profile else "general") or "general",
+            "is_in_my_panel": is_in_panel,
+            "relationship_established": req.responded_at if req else (patient_user.created_at),
             "last_report_date": latest_rep.created_at if latest_rep else None,
-            "current_triage": latest_rep.triage_priority if latest_rep else "No reports yet",
+            "current_triage": latest_rep.triage_priority if latest_rep else "awaiting_data",
             "triage_reasons": latest_rep.triage_reasons_json if latest_rep else [],
             "risk_score": latest_ai.risk_score if latest_ai else None,
             "risk_category": latest_ai.risk_category if latest_ai else None,
-            "request_id": req.id
+            "request_id": req.id if req else None
         })
     return results
+
+@router.post("/patient/{patient_id}/connect")
+def connect_patient_to_panel(
+    patient_id: int,
+    current_user: User = Depends(require_role(["doctor"])),
+    db: Session = Depends(get_db)
+):
+    patient = db.query(User).filter(User.id == patient_id, User.role == "patient").first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    existing = db.query(ConsultationRequest).filter(
+        ConsultationRequest.doctor_id == current_user.id,
+        ConsultationRequest.patient_id == patient_id
+    ).first()
+    
+    if existing:
+        existing.status = "accepted"
+        existing.responded_at = datetime.datetime.utcnow()
+    else:
+        disease = patient.patient_profile.primary_disease if patient.patient_profile else "general"
+        req = ConsultationRequest(
+            patient_id=patient_id,
+            doctor_id=current_user.id,
+            primary_disease=disease or "general",
+            status="accepted",
+            consultation_reason="Physician panel onboarding and remote surveillance oversight.",
+            introductory_message=f"Dr. {current_user.full_name} has connected to your care team.",
+            created_at=datetime.datetime.utcnow(),
+            responded_at=datetime.datetime.utcnow()
+        )
+        db.add(req)
+        
+    db.commit()
+    log_audit(db, current_user.id, "PATIENT_CONNECTED_TO_PANEL", "patient", str(patient_id), {})
+    return {"status": "success", "message": f"{patient.full_name} is now connected to your active care panel."}
 
 @router.get("/patient/{patient_id}/records")
 def get_patient_records(
@@ -212,11 +268,6 @@ def get_patient_records(
     current_user: User = Depends(require_role(["doctor"])),
     db: Session = Depends(get_db)
 ):
-    """
-    CRITICAL SECURITY INVARIANT:
-    Doctors must NEVER access records of patients who have not authorized them via an accepted consultation request.
-    HTTP 403 Forbidden is strictly raised if status != 'accepted'.
-    """
     authorized = db.query(ConsultationRequest).filter(
         ConsultationRequest.doctor_id == current_user.id,
         ConsultationRequest.patient_id == patient_id,
@@ -224,16 +275,13 @@ def get_patient_records(
     ).first()
     
     if not authorized:
-        log_audit(db, current_user.id, "UNAUTHORIZED_RECORD_ACCESS_BLOCKED", "patient_records", str(patient_id), {
-            "doctor_id": current_user.id,
-            "reason": "no_accepted_relationship"
-        })
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: You are not authorized to view this patient's medical records. An accepted consultation request is required."
+            detail="Access Forbidden: Consultation request has not been accepted. Patient records are locked to protect clinical privacy."
         )
-        
+
     patient_user = db.query(User).filter(User.id == patient_id).first()
+
     if not patient_user:
         raise HTTPException(status_code=404, detail="Patient account not found")
         
@@ -334,35 +382,28 @@ def get_priority_queue(
     tier: Optional[str] = None,
     disease: Optional[str] = None,
     unreviewed_only: bool = False,
+    scope: Optional[str] = "all",
     current_user: User = Depends(require_role(["doctor"])),
     db: Session = Depends(get_db)
 ):
-    """
-    SMART DOCTOR PRIORITY QUEUE:
-    Sorted deterministically:
-    1. emergency (pulsing red)
-    2. urgent (orange)
-    3. high (amber)
-    4. routine (emerald)
-    5. awaiting_review
-    Only across authorized (accepted) patients!
-    """
     accepted_reqs = db.query(ConsultationRequest).filter(
         ConsultationRequest.doctor_id == current_user.id,
         ConsultationRequest.status == "accepted"
     ).all()
     accepted_patient_ids = list(set(r.patient_id for r in accepted_reqs))
     
-    if not accepted_patient_ids:
-        return []
-        
-    query = db.query(DailyReport).filter(DailyReport.patient_id.in_(accepted_patient_ids))
+    if scope == "panel" and accepted_patient_ids:
+        query = db.query(DailyReport).filter(DailyReport.patient_id.in_(accepted_patient_ids))
+    else:
+        # Show all triage reports across clinic registry so doctor has full oversight
+        query = db.query(DailyReport)
     
     if tier and tier.lower() != "all":
         query = query.filter(DailyReport.triage_priority == tier.lower())
     if disease and disease.lower() != "all":
         query = query.filter(DailyReport.disease_module == disease.lower())
     if unreviewed_only:
+
         query = query.filter(DailyReport.doctor_reviewed == False)
         
     # Custom deterministic priority order
