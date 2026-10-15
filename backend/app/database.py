@@ -65,3 +65,17 @@ def init_db():
     import backend.app.models # noqa
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified and initialized successfully.")
+
+    # Automatically seed verified doctors and baseline dataset if database is newly initialized
+    db = SessionLocal()
+    try:
+        from backend.app.models import DoctorProfile
+        if db.query(DoctorProfile).count() == 0:
+            logger.info("Database empty: Auto-seeding certified clinical doctors directory...")
+            from backend.seed_data import seed_clinical_database
+            seed_clinical_database()
+    except Exception as e:
+        logger.debug(f"Auto-seed check note: {e}")
+    finally:
+        db.close()
+

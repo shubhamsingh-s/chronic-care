@@ -240,6 +240,15 @@ def get_doctors_directory(
     db: Session = Depends(get_db)
 ):
     query = db.query(DoctorProfile)
+    # Guarantee doctors are available even on freshly initialized cloud containers
+    if query.count() == 0:
+        try:
+            from backend.seed_data import seed_clinical_database
+            seed_clinical_database()
+            query = db.query(DoctorProfile)
+        except Exception:
+            pass
+
     if specialty and specialty.lower() != "all":
         query = query.filter(DoctorProfile.specialty.ilike(f"%{specialty}%"))
     if language:
@@ -251,6 +260,7 @@ def get_doctors_directory(
         
     # Show verified doctors first
     return query.order_by(DoctorProfile.is_verified.desc(), DoctorProfile.experience_years.desc()).all()
+
 
 @router.post("/requests")
 def create_consultation_request(
